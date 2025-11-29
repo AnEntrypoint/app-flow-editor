@@ -44,6 +44,18 @@
       color: #1a1a1a;
     }
     .toolbar button.primary:hover { background: #22c55e; }
+    .toolbar button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .toolbar button:disabled:hover { background: #3a3a3a; }
+    .history-indicator {
+      font-size: 12px;
+      color: #999;
+      padding: 6px 8px;
+      margin-left: 8px;
+      border-left: 1px solid #3a3a3a;
+    }
     .main {
       display: flex;
       flex: 1;
@@ -100,6 +112,10 @@
       width: 100%;
       height: 100%;
       position: relative;
+      background-image:
+        linear-gradient(rgba(78, 222, 128, 0.05) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(78, 222, 128, 0.05) 1px, transparent 1px);
+      background-size: 20px 20px;
     }
     .state-node {
       position: absolute;
@@ -215,10 +231,17 @@
   <div class="header">
     <div class="title">🔄 Flow Editor</div>
     <div class="toolbar">
+      <button id="undoBtn" onclick="undo()" disabled title="Undo (Ctrl+Z)">← Undo</button>
+      <button id="redoBtn" onclick="redo()" disabled title="Redo (Ctrl+Y)">Redo →</button>
+      <div class="history-indicator">
+        <span id="historyText">0/0</span>
+      </div>
       <button onclick="newFlow()">New Flow</button>
       <button onclick="saveFlow()" class="primary">Save</button>
       <button onclick="exportFlow()">Export</button>
+      <button onclick="document.getElementById('importFile').click()">Import</button>
       <button onclick="validateFlow()">Validate</button>
+      <input type="file" id="importFile" accept=".json" style="display: none" onchange="importFlow(event)">
     </div>
   </div>
   <div class="main">
@@ -245,6 +268,14 @@
     </div>
     <div class="canvas-container">
       <svg class="connection-line" id="connections" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1;">
+        <defs>
+          <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+            <polygon points="0 0, 10 3, 0 6" fill="#64b5f6" />
+          </marker>
+          <marker id="arrowhead-error" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+            <polygon points="0 0, 10 3, 0 6" fill="#ff5f56" />
+          </marker>
+        </defs>
       </svg>
       <div class="canvas" id="canvas">
         <div class="empty-state">
@@ -276,6 +307,76 @@
     };
 
     let selectedState = null;
+    let flowHistory = [];
+    let historyIndex = -1;
+    const MAX_HISTORY = 50;
+
+    function saveToHistory() {
+      flowHistory = flowHistory.slice(0, historyIndex + 1);
+      flowHistory.push(JSON.parse(JSON.stringify(currentFlow)));
+      if (flowHistory.length > MAX_HISTORY) {
+        flowHistory.shift();
+      } else {
+        historyIndex++;
+      }
+      updateHistoryIndicator();
+    }
+
+    function updateHistoryIndicator() {
+      document.getElementById('historyText').textContent = `${historyIndex + 1}/${flowHistory.length}`;
+      document.getElementById('undoBtn').disabled = historyIndex <= 0;
+      document.getElementById('redoBtn').disabled = historyIndex >= flowHistory.length - 1;
+    }
+
+    function undo() {
+      if (historyIndex > 0) {
+        historyIndex--;
+        currentFlow = JSON.parse(JSON.stringify(flowHistory[historyIndex]));
+        selectedState = null;
+        renderFlow();
+        updateHistoryIndicator();
+      }
+    }
+
+    function redo() {
+      if (historyIndex < flowHistory.length - 1) {
+        historyIndex++;
+        currentFlow = JSON.parse(JSON.stringify(flowHistory[historyIndex]));
+        selectedState = null;
+        renderFlow();
+        updateHistoryIndicator();
+      }
+    }
+
+    function deleteState(stateId) {
+      if (!stateId) return;
+      const state = currentFlow.states.find(s => s.id === stateId);
+      if (!state) return;
+      if (!confirm(`Delete state "${state.name}"?`)) return;
+
+      currentFlow.states = currentFlow.states.filter(s => s.id !== stateId);
+      currentFlow.states.forEach(s => {
+        if (s.onDone === stateId) delete s.onDone;
+        if (s.onError === stateId) delete s.onError;
+      });
+
+      if (currentFlow.states.length === 0) {
+        selectedState = null;
+      } else {
+        const initialState = currentFlow.states.find(s => s.type === 'initial');
+        const finalState = currentFlow.states.find(s => s.type === 'final');
+        if (!initialState && currentFlow.states.length > 0) {
+          currentFlow.states[0].type = 'initial';
+        }
+        if (!finalState && currentFlow.states.length > 0) {
+          currentFlow.states[currentFlow.states.length - 1].type = 'final';
+        }
+      }
+
+      selectedState = null;
+      saveToHistory();
+      renderFlow();
+    }
 
     function renderFlow() {
       const canvas = document.getElementById('canvas');
@@ -302,7 +403,8 @@
 
     function drawConnections() {
       const svg = document.getElementById('connections');
-      svg.innerHTML = '';
+      const defs = svg.querySelector('defs');
+      svg.innerHTML = '<defs><marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><polygon points="0 0, 10 3, 0 6" fill="#64b5f6" /></marker><marker id="arrowhead-error" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><polygon points="0 0, 10 3, 0 6" fill="#ff5f56" /></marker></defs>';
 
       currentFlow.states.forEach(state => {
         ['onDone', 'onError'].forEach(event => {
@@ -314,9 +416,10 @@
               line.setAttribute('y1', state.y + 40);
               line.setAttribute('x2', target.x + 70);
               line.setAttribute('y2', target.y + 20);
-              line.setAttribute('stroke', event === 'onError' ? '#ff5f56' : '#4ade80');
+              const isError = event === 'onError';
+              line.setAttribute('stroke', isError ? '#ff5f56' : '#4ade80');
               line.setAttribute('stroke-width', '2');
-              line.setAttribute('marker-end', 'url(#arrowhead)');
+              line.setAttribute('marker-end', `url(#${isError ? 'arrowhead-error' : 'arrowhead'})`);
               svg.appendChild(line);
             }
           }
@@ -360,7 +463,18 @@
             <input type="text" value="${state.onError || ''}" onchange="updateState('onError', this.value)" />
           </div>
         ` : ''}
+        <div style="margin-top: 20px; display: flex; gap: 10px;">
+          <button onclick="saveStateChanges()" style="flex: 1; background: #4ade80; color: #1a1a1a; border: none; padding: 8px; border-radius: 5px; cursor: pointer; font-weight: 600;">Save Changes</button>
+          <button onclick="deleteState('${state.id}')" style="flex: 1; background: #ff5f56; color: white; border: none; padding: 8px; border-radius: 5px; cursor: pointer; font-weight: 600;">Delete State</button>
+        </div>
       `;
+    }
+
+    function saveStateChanges() {
+      if (selectedState) {
+        saveToHistory();
+        renderFlow();
+      }
     }
 
     function updateState(field, value) {
@@ -380,6 +494,7 @@
         y: 100 + Math.floor(currentFlow.states.length / 3) * 120
       };
       currentFlow.states.push(newState);
+      saveToHistory();
       renderFlow();
     }
 
@@ -388,16 +503,23 @@
       const state = currentFlow.states.find(s => s.id === stateId);
       let startX = e.clientX - state.x;
       let startY = e.clientY - state.y;
+      let dragStarted = false;
 
       function onMouseMove(e) {
-        state.x = e.clientX - startX;
-        state.y = e.clientY - startY;
+        dragStarted = true;
+        const GRID_SIZE = 20;
+        const snapToGrid = (val) => Math.round(val / GRID_SIZE) * GRID_SIZE;
+        state.x = snapToGrid(e.clientX - startX);
+        state.y = snapToGrid(e.clientY - startY);
         renderFlow();
       }
 
       function onMouseUp() {
         document.removeEventListener('mousemove', onMouseMove);
         document.removeEventListener('mouseup', onMouseUp);
+        if (dragStarted) {
+          saveToHistory();
+        }
       }
 
       document.addEventListener('mousemove', onMouseMove);
@@ -434,6 +556,46 @@
       }
     }
 
+    function importFlow(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const imported = JSON.parse(e.target.result);
+
+          if (!imported.states || !Array.isArray(imported.states)) {
+            alert('Invalid flow file: missing states array');
+            return;
+          }
+
+          currentFlow = {
+            id: imported.id || 'imported-flow',
+            name: imported.name || 'imported-flow',
+            states: imported.states.map(state => ({
+              id: state.id || generateId(),
+              name: state.name || 'state',
+              type: state.type || 'normal',
+              x: state.x || 100,
+              y: state.y || 100,
+              onDone: state.onDone || null,
+              onError: state.onError || null
+            }))
+          };
+
+          selectedState = null;
+          saveToHistory();
+          renderFlow();
+          alert(`✓ Imported flow: ${currentFlow.name}\n${currentFlow.states.length} states loaded`);
+        } catch (error) {
+          alert('Error importing flow: ' + error.message);
+        }
+      };
+      reader.readAsText(file);
+      event.target.value = '';
+    }
+
     function newFlow() {
       currentFlow = {
         id: 'new-flow',
@@ -441,9 +603,26 @@
         states: []
       };
       selectedState = null;
+      flowHistory = [];
+      historyIndex = -1;
       renderFlow();
+      updateHistoryIndicator();
     }
 
+    document.addEventListener('keydown', (e) => {
+      if (e.ctrlKey && !e.shiftKey && e.key === 'z') {
+        e.preventDefault();
+        undo();
+      } else if (e.ctrlKey && (e.shiftKey && e.key === 'Z' || e.key === 'y')) {
+        e.preventDefault();
+        redo();
+      } else if (e.key === 'Delete' && selectedState) {
+        e.preventDefault();
+        deleteState(selectedState);
+      }
+    });
+
+    saveToHistory();
     renderFlow();
   </script>
 </body>
