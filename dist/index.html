@@ -124,9 +124,10 @@
       border-radius: 12px;
       padding: 16px 20px;
       min-width: 140px;
+      min-height: 80px;
       cursor: move;
       box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-      transition: all 0.2s;
+      transition: border-color 0.2s, box-shadow 0.2s;
     }
     .state-node:hover {
       border-color: #22c55e;
@@ -149,6 +150,30 @@
       text-transform: uppercase;
       color: #999;
       letter-spacing: 0.5px;
+    }
+    .resize-handle {
+      position: absolute;
+      bottom: 0;
+      right: 0;
+      width: 16px;
+      height: 16px;
+      cursor: nwse-resize;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+    .resize-handle::after {
+      content: '';
+      position: absolute;
+      bottom: 2px;
+      right: 2px;
+      width: 0;
+      height: 0;
+      border-style: solid;
+      border-width: 0 0 10px 10px;
+      border-color: transparent transparent #4ade80 transparent;
+    }
+    .state-node:hover .resize-handle {
+      opacity: 1;
     }
     .properties-panel {
       width: 320px;
@@ -389,12 +414,21 @@
         node.className = `state-node ${state.type} ${selectedState === state.id ? 'selected' : ''}`;
         node.style.left = state.x + 'px';
         node.style.top = state.y + 'px';
+        if (state.width) node.style.width = state.width + 'px';
+        if (state.height) node.style.height = state.height + 'px';
         node.innerHTML = `
           <div class="state-name">${state.name}</div>
           <div class="state-type">${state.type}</div>
+          <div class="resize-handle"></div>
         `;
         node.onclick = () => selectState(state.id);
-        node.onmousedown = (e) => startDrag(e, state.id);
+        node.onmousedown = (e) => {
+          if (e.target.classList.contains('resize-handle')) {
+            startResize(e, state.id);
+          } else {
+            startDrag(e, state.id);
+          }
+        };
         canvas.appendChild(node);
       });
 
@@ -407,15 +441,21 @@
       svg.innerHTML = '<defs><marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><polygon points="0 0, 10 3, 0 6" fill="#64b5f6" /></marker><marker id="arrowhead-error" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><polygon points="0 0, 10 3, 0 6" fill="#ff5f56" /></marker></defs>';
 
       currentFlow.states.forEach(state => {
+        const stateWidth = state.width || 140;
+        const stateHeight = state.height || 80;
+
         ['onDone', 'onError'].forEach(event => {
           if (state[event]) {
             const target = currentFlow.states.find(s => s.id === state[event]);
             if (target) {
+              const targetWidth = target.width || 140;
+              const targetHeight = target.height || 80;
+
               const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-              line.setAttribute('x1', state.x + 70);
-              line.setAttribute('y1', state.y + 40);
-              line.setAttribute('x2', target.x + 70);
-              line.setAttribute('y2', target.y + 20);
+              line.setAttribute('x1', state.x + stateWidth / 2);
+              line.setAttribute('y1', state.y + stateHeight);
+              line.setAttribute('x2', target.x + targetWidth / 2);
+              line.setAttribute('y2', target.y);
               const isError = event === 'onError';
               line.setAttribute('stroke', isError ? '#ff5f56' : '#4ade80');
               line.setAttribute('stroke-width', '2');
@@ -518,6 +558,39 @@
         document.removeEventListener('mousemove', onMouseMove);
         document.removeEventListener('mouseup', onMouseUp);
         if (dragStarted) {
+          saveToHistory();
+        }
+      }
+
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp);
+    }
+
+    function startResize(e, stateId) {
+      e.preventDefault();
+      e.stopPropagation();
+      const state = currentFlow.states.find(s => s.id === stateId);
+      const startWidth = state.width || 140;
+      const startHeight = state.height || 80;
+      const startX = e.clientX;
+      const startY = e.clientY;
+      let resizeStarted = false;
+
+      function onMouseMove(e) {
+        resizeStarted = true;
+        const GRID_SIZE = 20;
+        const snapToGrid = (val) => Math.round(val / GRID_SIZE) * GRID_SIZE;
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+        state.width = Math.max(140, snapToGrid(startWidth + dx));
+        state.height = Math.max(80, snapToGrid(startHeight + dy));
+        renderFlow();
+      }
+
+      function onMouseUp() {
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+        if (resizeStarted) {
           saveToHistory();
         }
       }
