@@ -250,9 +250,18 @@
       background: #22c55e;
       transform: scale(1.05);
     }
+    .toast-container { position: fixed; bottom: 20px; right: 20px; z-index: 2000; }
+    .toast { padding: 12px 16px; margin-bottom: 8px; border-radius: 4px; font-size: 13px; max-width: 300px; word-wrap: break-word; animation: slideIn 0.3s ease-out; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+    @keyframes slideIn { from { transform: translateX(350px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    @keyframes slideOut { to { transform: translateX(350px); opacity: 0; } }
+    .toast.success { background: #4caf50; color: white; }
+    .toast.error { background: #f48771; color: white; }
+    .toast.warning { background: #ff9800; color: white; }
+    .toast.info { background: #2196F3; color: white; }
   </style>
 </head>
 <body>
+  <div class="toast-container" id="toastContainer"></div>
   <div class="header">
     <div class="title">🔄 Flow Editor</div>
     <div class="toolbar">
@@ -319,6 +328,7 @@
   <button class="add-state-btn" onclick="addState('normal')">+</button>
 
   <script>
+    function showToast(message, type = "info", duration = 3000) { const c = document.getElementById("toastContainer"); if (!c) return; const t = document.createElement("div"); t.className = `toast ${type}`; t.textContent = message; c.appendChild(t); setTimeout(() => { t.style.animation = "slideOut 0.3s ease-out forwards"; setTimeout(() => t.remove(), 300); }, duration); } function showError(message) { showToast(message, "error"); } function showSuccess(message) { showToast(message, "success"); } function showWarning(message) { showToast(message, "warning"); }
     let currentFlow = {
       id: 'example-workflow',
       name: 'example-workflow',
@@ -599,9 +609,30 @@
       document.addEventListener('mouseup', onMouseUp);
     }
 
-    function saveFlow() {
-      console.log('Saving flow:', currentFlow);
-      alert('Flow saved! (In production, this would save to the Sequential ecosystem)');
+    async function saveFlow() {
+      try {
+        console.log('Saving flow:', currentFlow);
+        const res = await fetch('/api/flows', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(currentFlow)
+        });
+        const result = await res.json();
+        if (result.success) {
+          const title = document.querySelector('.title');
+          const originalText = title.textContent;
+          title.textContent = `✓ Flow Saved: ${currentFlow.name}`;
+          title.style.color = '#22c55e';
+          setTimeout(() => {
+            title.textContent = originalText;
+            title.style.color = '';
+          }, 2000);
+        } else {
+          showError(`Save failed: ${result.error}`);
+        }
+      } catch (error) {
+        showError(`Save error: ${error.message}`);
+      }
     }
 
     function exportFlow() {
@@ -623,9 +654,9 @@
         errors.push('Flow must have at least one final state');
       }
       if (errors.length) {
-        alert('Validation errors:\n' + errors.join('\n'));
+        showError('Validation errors:\n' + errors.join('\n'));
       } else {
-        alert('✓ Flow is valid!');
+        showError('✓ Flow is valid!');
       }
     }
 
@@ -639,7 +670,7 @@
           const imported = JSON.parse(e.target.result);
 
           if (!imported.states || !Array.isArray(imported.states)) {
-            alert('Invalid flow file: missing states array');
+            showError('Invalid flow file: missing states array');
             return;
           }
 
@@ -660,9 +691,9 @@
           selectedState = null;
           saveToHistory();
           renderFlow();
-          alert(`✓ Imported flow: ${currentFlow.name}\n${currentFlow.states.length} states loaded`);
+          showError(`✓ Imported flow: ${currentFlow.name}\n${currentFlow.states.length} states loaded`);
         } catch (error) {
-          alert('Error importing flow: ' + error.message);
+          showError('Error importing flow: ' + error.message);
         }
       };
       reader.readAsText(file);
