@@ -272,6 +272,7 @@
       </div>
       <button onclick="newFlow()">New Flow</button>
       <button onclick="saveFlow()" class="primary">Save</button>
+      <button id="runFlowBtn" onclick="runFlow()" title="Run the entire flow">▶ Run Flow</button>
       <button onclick="exportFlow()">Export</button>
       <button onclick="document.getElementById('importFile').click()">Import</button>
       <button onclick="validateFlow()">Validate</button>
@@ -382,6 +383,13 @@ function createStorageManager(appId) {
   
 
     function showToast(message, type = "info", duration = 3000) { const c = document.getElementById("toastContainer"); if (!c) return; const t = document.createElement("div"); t.className = `toast ${type}`; t.textContent = message; c.appendChild(t); setTimeout(() => { t.style.animation = "slideOut 0.3s ease-out forwards"; setTimeout(() => t.remove(), 300); }, duration); } function showError(message) { showToast(message, "error"); } function showSuccess(message) { showToast(message, "success"); } function showWarning(message) { showToast(message, "warning"); }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
     let currentFlow = {
       id: 'example-workflow',
       name: 'example-workflow',
@@ -480,8 +488,8 @@ function createStorageManager(appId) {
         if (state.width) node.style.width = state.width + 'px';
         if (state.height) node.style.height = state.height + 'px';
         node.innerHTML = `
-          <div class="state-name">${state.name}</div>
-          <div class="state-type">${state.type}</div>
+          <div class="state-name">${escapeHtml(state.name)}</div>
+          <div class="state-type">${escapeHtml(state.type)}</div>
           <div class="resize-handle"></div>
         `;
         node.onclick = () => selectState(state.id);
@@ -542,11 +550,11 @@ function createStorageManager(appId) {
       props.innerHTML = `
         <div class="form-group">
           <label>State ID</label>
-          <input type="text" value="${state.id}" onchange="updateState('id', this.value)" />
+          <input type="text" value="${escapeHtml(state.id)}" onchange="updateState('id', this.value)" />
         </div>
         <div class="form-group">
           <label>State Name</label>
-          <input type="text" value="${state.name}" onchange="updateState('name', this.value)" />
+          <input type="text" value="${escapeHtml(state.name)}" onchange="updateState('name', this.value)" />
         </div>
         <div class="form-group">
           <label>Type</label>
@@ -558,17 +566,39 @@ function createStorageManager(appId) {
         </div>
         ${state.type !== 'final' ? `
           <div class="form-group">
+            <label>Handler Type</label>
+            <select onchange="updateState('handlerType', this.value)">
+              <option value="code" ${(state.handlerType || 'code') === 'code' ? 'selected' : ''}>Inline Code</option>
+              <option value="task" ${state.handlerType === 'task' ? 'selected' : ''}>Task Invocation</option>
+            </select>
+          </div>
+          ${(state.handlerType || 'code') === 'code' ? `
+            <div class="form-group">
+              <label>Code Handler</label>
+              <textarea onchange="updateState('code', this.value)">${escapeHtml(state.code || '')}</textarea>
+            </div>
+          ` : `
+            <div class="form-group">
+              <label>Task Name</label>
+              <input type="text" value="${escapeHtml(state.taskName || '')}" onchange="updateState('taskName', this.value)" placeholder="e.g. my-task" />
+            </div>
+            <div class="form-group">
+              <label>Task Input</label>
+              <textarea onchange="updateState('taskInput', this.value)" placeholder='{"key": "value"}'>${escapeHtml(state.taskInput || '')}</textarea>
+            </div>
+          `}
+          <div class="form-group">
             <label>On Done (next state)</label>
-            <input type="text" value="${state.onDone || ''}" onchange="updateState('onDone', this.value)" />
+            <input type="text" value="${escapeHtml(state.onDone || '')}" onchange="updateState('onDone', this.value)" />
           </div>
           <div class="form-group">
             <label>On Error (fallback state)</label>
-            <input type="text" value="${state.onError || ''}" onchange="updateState('onError', this.value)" />
+            <input type="text" value="${escapeHtml(state.onError || '')}" onchange="updateState('onError', this.value)" />
           </div>
         ` : ''}
         <div style="margin-top: 20px; display: flex; gap: 10px;">
           <button onclick="saveStateChanges()" style="flex: 1; background: #4ade80; color: #1a1a1a; border: none; padding: 8px; border-radius: 5px; cursor: pointer; font-weight: 600;">Save Changes</button>
-          <button onclick="deleteState('${state.id}')" style="flex: 1; background: #ff5f56; color: white; border: none; padding: 8px; border-radius: 5px; cursor: pointer; font-weight: 600;">Delete State</button>
+          <button onclick="deleteState('${escapeHtml(state.id)}')" style="flex: 1; background: #ff5f56; color: white; border: none; padding: 8px; border-radius: 5px; cursor: pointer; font-weight: 600;">Delete State</button>
         </div>
       `;
     }
@@ -662,6 +692,32 @@ function createStorageManager(appId) {
       document.addEventListener('mouseup', onMouseUp);
     }
 
+    async function loadFlows() {
+      try {
+        const res = await fetch('/api/flows');
+        const flows = await res.json();
+        const flowList = document.getElementById('flowList');
+        flowList.innerHTML = '';
+        (flows.flows || flows || []).forEach(flow => {
+          const li = document.createElement('li');
+          li.className = `flow-item ${flow.id === currentFlow.id ? 'active' : ''}`;
+          li.onclick = () => {
+            currentFlow = flow;
+            selectedState = null;
+            renderFlow();
+            loadFlows();
+          };
+          li.innerHTML = `
+            <div class="flow-name">${escapeHtml(flow.name || flow.id)}</div>
+            <div class="flow-desc">${escapeHtml((flow.description || '').substring(0, 50))}</div>
+          `;
+          flowList.appendChild(li);
+        });
+      } catch (error) {
+        console.error('Failed to load flows:', error);
+      }
+    }
+
     async function saveFlow() {
       try {
         console.log('Saving flow:', currentFlow);
@@ -671,7 +727,8 @@ function createStorageManager(appId) {
           body: JSON.stringify(currentFlow)
         });
         const result = await res.json();
-        if (result.success) {
+        if (result.success || result.id) {
+          currentFlow.id = result.id || currentFlow.id;
           const title = document.querySelector('.title');
           const originalText = title.textContent;
           title.textContent = `✓ Flow Saved: ${currentFlow.name}`;
@@ -680,11 +737,50 @@ function createStorageManager(appId) {
             title.textContent = originalText;
             title.style.color = '';
           }, 2000);
+          loadFlows();
         } else {
           showError(`Save failed: ${result.error}`);
         }
       } catch (error) {
         showError(`Save error: ${error.message}`);
+      }
+    }
+
+    async function runFlow() {
+      if (!currentFlow.states.some(s => s.type === 'initial')) {
+        showError('Flow must have an initial state');
+        return;
+      }
+      const input = prompt('Enter flow input (JSON):', '{}');
+      if (input === null) return;
+      try {
+        JSON.parse(input);
+      } catch {
+        showError('Invalid JSON input');
+        return;
+      }
+      try {
+        const runBtn = document.getElementById('runFlowBtn');
+        runBtn.disabled = true;
+        runBtn.textContent = 'Running...';
+        const res = await fetch('/api/flows/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ flowId: currentFlow.id, flow: currentFlow, input: JSON.parse(input) })
+        });
+        const result = await res.json();
+        runBtn.disabled = false;
+        runBtn.textContent = '▶ Run Flow';
+        if (result.success) {
+          showSuccess(`Flow execution completed\nDuration: ${result.duration}ms\nFinal state: ${result.finalState}`);
+        } else {
+          showError(`Flow execution failed: ${result.error}`);
+        }
+      } catch (error) {
+        const runBtn = document.getElementById('runFlowBtn');
+        runBtn.disabled = false;
+        runBtn.textContent = '▶ Run Flow';
+        showError(`Execution error: ${error.message}`);
       }
     }
 
@@ -781,6 +877,7 @@ function createStorageManager(appId) {
 
     saveToHistory();
     renderFlow();
+    loadFlows();
   </script>
 </body>
 </html>
