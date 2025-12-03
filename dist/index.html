@@ -695,10 +695,12 @@ function createStorageManager(appId) {
     async function loadFlows() {
       try {
         const res = await fetch('/api/flows');
-        const flows = await res.json();
+        const response = await res.json();
+        let flows = (response.data && Array.isArray(response.data)) ? response.data : (response.flows || response || []);
+        if (!Array.isArray(flows)) flows = [];
         const flowList = document.getElementById('flowList');
         flowList.innerHTML = '';
-        (flows.flows || flows || []).forEach(flow => {
+        flows.forEach(flow => {
           const li = document.createElement('li');
           li.className = `flow-item ${flow.id === currentFlow.id ? 'active' : ''}`;
           li.onclick = () => {
@@ -878,6 +880,11 @@ function createStorageManager(appId) {
     saveToHistory();
     renderFlow();
     loadFlows();
+  </script>
+  <script src="/error-handler.js"></script>
+  <script>
+    const errorHandler = new ErrorHandler('app-flow-editor');
+    window.errorHandler = errorHandler;
   </script>
 </body>
 </html>
